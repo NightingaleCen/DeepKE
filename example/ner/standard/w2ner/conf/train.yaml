@@ -1,12 +1,12 @@
-data_dir: "data/people's daily"
+data_dir: "data/"
 save_path: "output"
-device: 2 # cuda
+device: 0 # cuda
 
-do_train: False
+do_train: True
 do_eval: True
-do_predict: True
+do_predict: False
 
-epochs: 15           # the number of training epochs
+epochs: 24           # the number of training epochs
 batch_size: 8
 
 warm_factor: 0.1  # warmup rate
