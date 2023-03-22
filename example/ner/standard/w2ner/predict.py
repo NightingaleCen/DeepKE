@@ -88,7 +88,11 @@ def main(cfg):
 
     for plant, texts in predict_data.items():
         result[plant] = {}
+
         for entity_text in texts:
+            if len(entity_text) == 0 or len(entity_text) > 512:
+                progress_bar.update(1)
+                continue
 
             length = len([word for word in entity_text])
             tokens = [tokenizer.tokenize(word) for word in entity_text]
@@ -161,11 +165,19 @@ def main(cfg):
 
                     if entity_label not in result[plant]:
                         result[plant][entity_label] = []
-                    result[plant][entity_label].append(entity)
+                    if entity not in result[plant][entity_label]:
+                        result[plant][entity_label].append(entity)
                 progress_bar.update(1)
 
     with open('../../output/result.json', 'w') as f:
-        json.dump(result, f, ensure_ascii=False)
+        json.dump(
+            result,
+            f,
+            ensure_ascii=False,
+            indent=4,
+            separators=(
+                ',',
+                ': '))
 
 
 if __name__ == "__main__":
