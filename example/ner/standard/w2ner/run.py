@@ -14,11 +14,14 @@ from deepke.name_entity_re.standard.w2ner import *
 from deepke.name_entity_re.standard.w2ner.utils import *
 from deepke.name_entity_re.standard.tools import *
 
+import wandb
 
-logging.basicConfig(format = '%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
-                    datefmt = '%m/%d/%Y %H:%M:%S',
-                    level = logging.INFO)
+
+logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
+                    datefmt='%m/%d/%Y %H:%M:%S',
+                    level=logging.INFO)
 logger = logging.getLogger(__name__)
+
 
 class Trainer(object):
     def __init__(self, config, model):
@@ -40,7 +43,8 @@ class Trainer(object):
              'weight_decay': config.weight_decay},
         ]
 
-        self.optimizer = transformers.AdamW(params, lr=config.learning_rate, weight_decay=config.weight_decay)
+        self.optimizer = transformers.AdamW(
+            params, lr=config.learning_rate, weight_decay=config.weight_decay)
         self.scheduler = transformers.get_linear_schedule_with_warmup(self.optimizer,
                                                                       num_warmup_steps=config.warm_factor * config.updates_total,
                                                                       num_training_steps=config.updates_total)
@@ -56,13 +60,21 @@ class Trainer(object):
 
             bert_inputs, grid_labels, grid_mask2d, pieces2word, dist_inputs, sent_length = data_batch
 
-            outputs = self.model(bert_inputs, grid_mask2d, dist_inputs, pieces2word, sent_length)
+            outputs = self.model(
+                bert_inputs,
+                grid_mask2d,
+                dist_inputs,
+                pieces2word,
+                sent_length)
 
             grid_mask2d = grid_mask2d.clone()
-            loss = self.criterion(outputs[grid_mask2d], grid_labels[grid_mask2d])
+            loss = self.criterion(
+                outputs[grid_mask2d],
+                grid_labels[grid_mask2d])
 
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), config.clip_grad_norm)
+            torch.nn.utils.clip_grad_norm_(
+                self.model.parameters(), config.clip_grad_norm)
             self.optimizer.step()
             self.optimizer.zero_grad()
 
@@ -86,10 +98,17 @@ class Trainer(object):
         # table = pt.PrettyTable(["Train {}".format(epoch), "Loss"])
         # table.add_row(["Label", "{:.4f}".format(np.mean(loss_list))])
 
-        table = pt.PrettyTable(["Train {}".format(epoch), "Loss", "F1", "Precision", "Recall"])
+        table = pt.PrettyTable(
+            ["Train {}".format(epoch), "Loss", "F1", "Precision", "Recall"])
         table.add_row(["Label", "{:.4f}".format(np.mean(loss_list))] +
                       ["{:3.4f}".format(x) for x in [f1, p, r]])
         logger.info("\n{}".format(table))
+
+        wandb.log({
+            'train_loss': np.mean(loss_list),
+            'train_f1': f1
+        })
+
         return f1
 
     def eval(self, config, epoch, data_loader, is_test=False):
@@ -102,18 +121,25 @@ class Trainer(object):
         total_ent_p = 0
         total_ent_c = 0
         with torch.no_grad():
-            for i, data_batch in tqdm(enumerate(data_loader), desc='Evaluating'):
+            for i, data_batch in tqdm(
+                    enumerate(data_loader), desc='Evaluating'):
                 entity_text = data_batch[-1]
                 data_batch = [data.cuda() for data in data_batch[:-1]]
                 bert_inputs, grid_labels, grid_mask2d, pieces2word, dist_inputs, sent_length = data_batch
 
-                outputs = self.model(bert_inputs, grid_mask2d, dist_inputs, pieces2word, sent_length)
+                outputs = self.model(
+                    bert_inputs,
+                    grid_mask2d,
+                    dist_inputs,
+                    pieces2word,
+                    sent_length)
                 length = sent_length
 
                 grid_mask2d = grid_mask2d.clone()
 
                 outputs = torch.argmax(outputs, -1)
-                ent_c, ent_p, ent_r, _ = decode(outputs.cpu().numpy(), entity_text, length.cpu().numpy())
+                ent_c, ent_p, ent_r, _ = decode(
+                    outputs.cpu().numpy(), entity_text, length.cpu().numpy())
 
                 total_ent_r += ent_r
                 total_ent_p += ent_p
@@ -137,13 +163,29 @@ class Trainer(object):
         # logger.info('{} Label F1 {}'.format(title, f1_score(label_result.numpy(),
         #                                                     pred_result.numpy(),
         #                                                     average=None)))
-        logger.info('\n{}'.format(classification_report(label_result.numpy(), pred_result.numpy())))
+        logger.info(
+            '\n{}'.format(
+                classification_report(
+                    label_result.numpy(),
+                    pred_result.numpy())))
 
-        table = pt.PrettyTable(["{} {}".format(title, epoch), 'F1', "Precision", "Recall"])
+        table = pt.PrettyTable(
+            ["{} {}".format(title, epoch), 'F1', "Precision", "Recall"])
         table.add_row(["Label"] + ["{:3.4f}".format(x) for x in [f1, p, r]])
-        table.add_row(["Entity"] + ["{:3.4f}".format(x) for x in [e_f1, e_p, e_r]])
+        table.add_row(["Entity"] + ["{:3.4f}".format(x)
+                      for x in [e_f1, e_p, e_r]])
 
         logger.info("\n{}".format(table))
+
+        wandb.log({
+            'eval_entity_f1': e_f1,
+            'eval_label_f1': f1,
+            'eval_entity_precision': e_p,
+            'eval_label_precision': p,
+            'eval_entity_recall': e_r,
+            'eval_label_recall': r
+        })
+
         return e_f1
 
     def predict(self, config, epoch, data_loader, data):
@@ -161,18 +203,24 @@ class Trainer(object):
         i = 0
         with torch.no_grad():
             for data_batch in data_loader:
-                sentence_batch = data[i:i+config.batch_size]
+                sentence_batch = data[i:i + config.batch_size]
                 entity_text = data_batch[-1]
                 data_batch = [data.cuda() for data in data_batch[:-1]]
                 bert_inputs, grid_labels, grid_mask2d, pieces2word, dist_inputs, sent_length = data_batch
 
-                outputs = self.model(bert_inputs, grid_mask2d, dist_inputs, pieces2word, sent_length)
+                outputs = self.model(
+                    bert_inputs,
+                    grid_mask2d,
+                    dist_inputs,
+                    pieces2word,
+                    sent_length)
                 length = sent_length
 
                 grid_mask2d = grid_mask2d.clone()
 
                 outputs = torch.argmax(outputs, -1)
-                ent_c, ent_p, ent_r, decode_entities = decode(outputs.cpu().numpy(), entity_text, length.cpu().numpy())
+                ent_c, ent_p, ent_r, decode_entities = decode(
+                    outputs.cpu().numpy(), entity_text, length.cpu().numpy())
 
                 for ent_list, sentence in zip(decode_entities, sentence_batch):
                     sentence = sentence["sentence"]
@@ -203,12 +251,14 @@ class Trainer(object):
 
         title = "TEST"
         logger.info('{} Label F1 {}'.format("TEST", f1_score(label_result.numpy(),
-                                                            pred_result.numpy(),
-                                                            average=None)))
+                                                             pred_result.numpy(),
+                                                             average=None)))
 
-        table = pt.PrettyTable(["{} {}".format(title, epoch), 'F1', "Precision", "Recall"])
+        table = pt.PrettyTable(
+            ["{} {}".format(title, epoch), 'F1', "Precision", "Recall"])
         table.add_row(["Label"] + ["{:3.4f}".format(x) for x in [f1, p, r]])
-        table.add_row(["Entity"] + ["{:3.4f}".format(x) for x in [e_f1, e_p, e_r]])
+        table.add_row(["Entity"] + ["{:3.4f}".format(x)
+                      for x in [e_f1, e_p, e_r]])
 
         logger.info("\n{}".format(table))
 
@@ -223,14 +273,21 @@ class Trainer(object):
     def load(self, path):
         self.model.load_state_dict(torch.load(path))
 
+
 @hydra.main(config_path="conf", config_name='config')
 def main(cfg):
+    wandb.init(
+        project='deepke-ner-w2ner',
+        config=cfg
+    )
+
     config = type('Config', (), {})()
     for key in cfg.keys():
         config.__setattr__(key, cfg.get(key))
     logger.info(config)
     config.logger = logger
-    if not os.path.exists(os.path.join(utils.get_original_cwd(), cfg.save_path)):
+    if not os.path.exists(os.path.join(
+            utils.get_original_cwd(), cfg.save_path)):
         os.makedirs(os.path.join(utils.get_original_cwd(), cfg.save_path))
 
     if torch.cuda.is_available():
@@ -247,16 +304,17 @@ def main(cfg):
 
     processor = NerProcessor()
 
-
     train_examples = processor.get_train_examples(os.path.join(utils.get_original_cwd(),
                                                                config.data_dir)) if config.do_train else None
     eval_examples = processor.get_dev_examples(os.path.join(utils.get_original_cwd(),
                                                             config.data_dir)) if config.do_eval else None
     test_examples = processor.get_test_examples(os.path.join(utils.get_original_cwd(),
                                                              config.data_dir)) if config.do_predict else None
-    datasets, ori_data = data_loader.load_data_bert(config, train_examples, eval_examples, test_examples)
+    datasets, ori_data = data_loader.load_data_bert(
+        config, train_examples, eval_examples, test_examples)
 
-    config.updates_total = len(datasets[0]) // config.batch_size * config.epochs if datasets[0] else 0
+    config.updates_total = len(
+        datasets[0]) // config.batch_size * config.epochs if datasets[0] else 0
 
     logger.info("Building Model")
     model = Model(config)
@@ -286,7 +344,11 @@ def main(cfg):
                 f1 = trainer.eval(config, i, dev_loader)
                 if f1 > best_f1:
                     best_f1 = f1
-                    trainer.save(os.path.join(utils.get_original_cwd(), config.save_path, 'pytorch_model.bin'))
+                    trainer.save(
+                        os.path.join(
+                            utils.get_original_cwd(),
+                            config.save_path,
+                            'pytorch_model.bin'))
 
             if config.do_predict:
                 test_f1 = trainer.eval(config, i, test_loader, is_test=True)
@@ -296,13 +358,18 @@ def main(cfg):
         if config.do_predict:
             logger.info("Best TEST F1: {:3.4f}".format(best_test_f1))
     else:
-        trainer.load(os.path.join(utils.get_original_cwd(), config.save_path, 'pytorch_model.bin'))
+        trainer.load(
+            os.path.join(
+                utils.get_original_cwd(),
+                config.save_path,
+                'pytorch_model.bin'))
 
         if config.do_eval:
             f1 = trainer.eval(config, config.epochs, dev_loader)
             logger.info("DEV F1: {:3.4f}".format(f1))
         if config.do_predict:
-            test_f1 = trainer.eval(config, config.epochs, test_loader, is_test=True)
+            test_f1 = trainer.eval(
+                config, config.epochs, test_loader, is_test=True)
             logger.info("TEST F1: {:3.4f}".format(test_f1))
 
 

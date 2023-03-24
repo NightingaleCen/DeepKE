@@ -1,6 +1,6 @@
 data_dir: "data/"
 save_path: "output"
-device: 0 # cuda
+device: 1 # cuda
 
 do_train: True
 do_eval: True
